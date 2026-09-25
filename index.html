@@ -214,6 +214,35 @@ details.toc-root>summary{color:var(--fg);font-weight:600;font-size:11px;text-tra
 #bottombar .sep{width:8px}
 #bottombar.bar-hidden{transform:translateX(-50%) translateY(160%);opacity:0;pointer-events:none}
 
+#pct{
+  position:fixed;left:50%;bottom:14px;transform:translateX(-50%);
+  z-index:12;
+  font-size:11px;color:var(--fg-dim);
+  background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  padding:3px 9px;cursor:pointer;opacity:.85;line-height:1.4;
+  font-variant-numeric:tabular-nums;
+  user-select:none;-webkit-user-select:none;
+  transition:opacity .2s ease;
+  white-space:nowrap;
+}
+#pct:hover{opacity:1;color:var(--fg)}
+#pct .caret{font-size:9px}
+#seek{
+  position:fixed;left:50%;bottom:42px;transform:translateX(-50%);
+  z-index:12;display:none;width:min(72vw,420px);
+  accent-color:var(--accent);cursor:pointer;
+}
+#toast{
+  position:fixed;top:14px;left:50%;transform:translateX(-50%);
+  z-index:12;
+  font-size:12px;color:var(--fg-dim);background:var(--bg2);
+  border:1px solid var(--line);border-radius:12px;
+  padding:6px 12px;opacity:0;pointer-events:none;
+  transition:opacity .25s ease;
+  max-width:80vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#toast.show{opacity:1}
+
 .sw{width:20px;height:20px;border-radius:50%;padding:0;border:1px solid var(--line)}
 .sw:hover{border-color:var(--fg-dim)}
 .sw.active{outline:2px solid var(--accent);outline-offset:1px}
@@ -271,6 +300,8 @@ details.toc-root>summary{color:var(--fg);font-weight:600;font-size:11px;text-tra
   #content{padding:5vh 4.5vw calc(30vh + env(safe-area-inset-bottom))}
   #bottombar{display:flex}
   #scrim.show{display:block}
+  #pct{bottom:calc(env(safe-area-inset-bottom) + 78px)}
+  #seek{bottom:calc(env(safe-area-inset-bottom) + 106px)}
 }
 </style>
 </head>
@@ -301,6 +332,9 @@ details.toc-root>summary{color:var(--fg);font-weight:600;font-size:11px;text-tra
     <div id="zprev" title="Previous chapter (←)">‹</div>
     <div id="znext" title="Next chapter (→)">›</div>
     <div id="progress"></div>
+    <div id="pct" title="Jump to position">0%<span class="caret"> ⌄</span></div>
+    <input type="range" id="seek" min="0" max="1000" step="1" value="0" aria-label="Seek position">
+    <div id="toast" aria-live="polite"></div>
 
     <nav id="bottombar" aria-label="Reading controls">
       <button id="barToc" aria-label="Chapters" aria-expanded="false">☰</button>
@@ -354,6 +388,7 @@ var els={
   btnSerif:$('#btnSerif'), btnHide:$('#btnHide'), btnChoose:$('#btnChoose'), btnSidebar:$('#btnSidebar'),
   swatches:$('#swatches'),
   scrim:$('#scrim'), bottombar:$('#bottombar'),
+  pct:$('#pct'), seek:$('#seek'), toast:$('#toast'),
   barToc:$('#barToc'), barPrev:$('#barPrev'), barNext:$('#barNext'), barTheme:$('#barTheme'), barFull:$('#barFull'),
   zprev:$('#zprev'), znext:$('#znext')
 };
@@ -1024,14 +1059,53 @@ function setActiveChapter(idx){
   }
 }
 
+var endShown=false;
+var toastTimer=null;
+function toast(msg){
+  els.toast.textContent=msg;
+  els.toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(function(){els.toast.classList.remove('show');},2200);
+}
+
+function jumpTo(p){
+  p=Math.max(0,Math.min(1,p));
+  var total=chapters.length;
+  var idx=Math.min(total-1,Math.floor(p*total));
+  var frac=p*total-idx;
+  renderChapter(idx);
+  var apply=function(){
+    var sc=els.content;
+    var h=sc.scrollHeight-sc.clientHeight;
+    sc.scrollTop=Math.max(0,Math.min(h,frac*h));
+    updateProgress();
+  };
+  if('requestAnimationFrame' in window){requestAnimationFrame(apply);}
+  else{apply();}
+}
+
+function toggleSeek(){
+  var show=els.seek.style.display==='none'||!els.seek.style.display;
+  els.seek.style.display=show?'block':'none';
+  if(show) updateProgress();
+}
+
 function updateProgress(){
   var sc=els.content;
   var total=chapters.length;
   var frac=(sc.scrollHeight-sc.clientHeight)>0?sc.scrollTop/(sc.scrollHeight-sc.clientHeight):0;
   frac=Math.max(0,Math.min(1,frac));
-  var rank=(current+frac)/total;
-  els.progress.style.width=(Math.max(0.004,rank*100))+'%';
+  var rank=total>0?(current+frac)/total:0;
+  var pct=Math.round(rank*100);
+  els.progress.style.width=(Math.max(0.004,pct))+'%';
   sc.dataset.fraction=frac.toFixed(4);
+  els.pct.textContent=pct+'%';
+  els.seek.value=Math.round(rank*1000);
+  if(current===total-1&&frac>0.97){
+    if(!endShown){endShown=true;toast('· The End ·');}
+  }else{
+    endShown=false;
+  }
 }
 
 var scrollRAF=null;
@@ -1082,6 +1156,7 @@ function renderChapter(idx,anchor){
   var title=(ch.title||('Chapter '+(idx+1)));
   document.title=book.title+' — '+title;
   els.title.textContent=book.title;
+  if(chapters.length>1) toast((idx+1)+' / '+chapters.length+' · '+title);
 
   var after=function(){
     if(anchor){
@@ -1238,6 +1313,18 @@ function initEvents(){
   els.barFull.addEventListener('click',toggleFullscreen);
   els.scrim.addEventListener('click',function(){setMenu(false);});
 
+  els.pct.addEventListener('click',toggleSeek);
+  els.seek.addEventListener('input',function(){
+    els.pct.textContent=Math.round((els.seek.value/els.seek.max)*100)+'%';
+  });
+  els.seek.addEventListener('change',function(){
+    toggleSeek();
+    jumpTo(els.seek.value/els.seek.max);
+  });
+  els.seek.addEventListener('keydown',function(e){
+    if(e.key==='Escape') toggleSeek();
+  });
+
   els.zprev.addEventListener('click',function(){nextChapter(-1);});
   els.znext.addEventListener('click',function(){nextChapter(1);});
 
@@ -1273,11 +1360,13 @@ function initEvents(){
 
   document.addEventListener('keydown',function(e){
     var t=e.target;
+    if(e.target===els.seek&&e.key==='Escape'){toggleSeek();return;}
     if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA')) return;
     if(e.metaKey||e.ctrlKey||e.altKey) return;
     var k=e.key;
     if(k==='ArrowRight'){e.preventDefault();nextChapter(1);}
     else if(k==='ArrowLeft'){e.preventDefault();nextChapter(-1);}
+    else if(k==='g'||k==='G'){toggleSeek();}
     else if(k==='f'||k==='F'){toggleFullscreen();}
     else if(k==='t'||k==='T'){
       if(isMobile()){setMenu(!menuOpen);}
