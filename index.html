@@ -1171,7 +1171,7 @@ function cancelScrollAnim(){
 }
 
 function animateScrollTo(to,dur){
-  cancelScrollAnim();
+  cancelScrollAnim();stopFlow();
   var sc=els.content;
   var maxT=Math.max(0,sc.scrollHeight-sc.clientHeight);
   to=Math.max(0,Math.min(maxT,to));
@@ -1187,7 +1187,7 @@ function animateScrollTo(to,dur){
   tick(start);
 }
 
-var flowV=0,flowRAF=null,lastFlowNow=0;
+var flowV=0,flowRAF=null,lastFlowNow=0,lastWheelAt=0;
 
 function stopFlow(){
   if(flowRAF){cancelAnimationFrame(flowRAF);flowRAF=null;}
@@ -1197,9 +1197,10 @@ function stopFlow(){
 function flowInertia(dV){
   cancelScrollAnim();
   var cap=Math.max(600,els.content.clientHeight);
-  flowV=Math.max(-cap,Math.min(cap,flowV*0.55+dV));
+  flowV=Math.max(-cap,Math.min(cap,dV));
+  lastWheelAt=performance.now();
   if(flowRAF) return;
-  lastFlowNow=performance.now();
+  lastFlowNow=lastWheelAt;
   flowRAF=requestAnimationFrame(flowTick);
 }
 
@@ -1208,26 +1209,29 @@ function flowTick(now){
   lastFlowNow=now;
   var sc=els.content;
   var maxT=Math.max(0,sc.scrollHeight-sc.clientHeight);
+  var idle=now-lastWheelAt>90;
+  if(idle) flowV*=Math.pow(0.90,dt/16.67);
   var step=flowV*(dt/16.67);
   var nt=sc.scrollTop+step;
-  if(nt<=0||nt>=maxT||sc.scrollTop===0||sc.scrollTop>=maxT){
+  var goingUp=nt<0;
+  var goingDown=nt>maxT;
+  if(goingUp||goingDown){
     sc.scrollTo({top:Math.max(0,Math.min(maxT,nt)),behavior:'instant'});
     stopFlow();
     return;
   }
   sc.scrollTo({top:nt,behavior:'instant'});
-  flowV*=Math.pow(0.90,dt/16.67);
-  if(Math.abs(flowV)<0.4){stopFlow();}
+  if(idle&&Math.abs(flowV)<0.4){stopFlow();}
   else flowRAF=requestAnimationFrame(flowTick);
 }
 
 function scrollByLines(d){
-  animateScrollTo(els.content.scrollTop+d*40,240);
+  animateScrollTo(els.content.scrollTop+d*40,90);
 }
 
 function scrollPage(d){
   var sc=els.content;
-  animateScrollTo(sc.scrollTop+d*Math.max(1,sc.clientHeight*0.88),340);
+  animateScrollTo(sc.scrollTop+d*Math.max(1,sc.clientHeight*0.88),260);
 }
 
 function updateProgress(){
@@ -1462,7 +1466,7 @@ function initEvents(){
     var d=e.deltaY;
     if(e.deltaMode===1) d*=18;
     else if(e.deltaMode===2) d*=els.content.clientHeight*0.9;
-    flowInertia(d*0.20);
+    flowInertia(d*0.30);
   },{passive:false});
 
   els.pct.addEventListener('click',toggleSeek);
